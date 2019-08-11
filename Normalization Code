@@ -1,0 +1,162 @@
+from sqlalchemy import create_engine
+conn_url = 'postgresql://postgres:y1d8v68m@su19server.apan5310.com:50105/project'
+engine = create_engine(conn_url)
+connection = engine.connect()
+
+stmt = """
+CREATE TABLE locale (
+LOCALE float,
+LOCALE_DESC text NOT NULL,
+PRIMARY KEY (LOCALE)
+ );
+
+CREATE TABLE school_bio (
+UNITID integer,
+INSTNM varchar(200) NOT NULL,
+INSTURL text,
+ADM_RATE float,
+UGDS integer,
+AVGFACSAL float,
+PFTFAC float,
+DEBT_MDN varchar(20),
+PRIMARY KEY (UNITID)
+ );
+
+CREATE TABLE city (
+UNITID integer,
+CITY varchar(30) NOT NULL,
+STABBR char(2) NOT NULL,
+ZIP varchar(20) NOT NULL,
+LOCALE float,
+LATITUDE float,
+LONGITUDE float,
+REGION varchar(30) NOT NULL,
+PRIMARY KEY (UNITID),
+FOREIGN KEY (LOCALE) REFERENCES locale,
+FOREIGN KEY (UNITID) REFERENCES school_bio,
+CHECK (char_length(STABBR)=2)
+ );
+
+ 
+CREATE TABLE mission (
+MISSION_ID varchar(20),
+MISSION varchar(100) NOT NULL,
+PRIMARY KEY (MISSION_ID)
+ );
+
+
+CREATE TABLE school_mission (
+UNITID  integer,
+MISSION_ID varchar(20),
+PRIMARY KEY (UNITID, MISSION_ID),
+FOREIGN KEY (MISSION_ID) REFERENCES mission,
+FOREIGN KEY (UNITID) REFERENCES school_bio
+);
+
+
+CREATE TABLE test (
+SAT_ID varchar(20),
+SAT_TYPE varchar(10) NOT NULL,
+PRIMARY KEY (SAT_ID)
+ );
+
+CREATE TABLE school_test (
+UNITID integer,
+SAT_ID varchar(20),
+SAT_SCORE integer,
+PRIMARY KEY (UNITID, SAT_ID),
+FOREIGN KEY (SAT_ID) REFERENCES test,
+FOREIGN KEY (UNITID) REFERENCES school_bio
+ );
+
+CREATE TABLE control (
+CONTROL  integer,
+CONTROL_TYPE varchar (20) NOT NULL,
+PRIMARY KEY (CONTROL)
+ );
+
+CREATE TABLE school_control (
+UNITID integer,
+CONTROL integer NOT NULL,
+PRIMARY KEY (UNITID, CONTROL),
+FOREIGN KEY (CONTROL) REFERENCES control,
+FOREIGN KEY (UNITID) REFERENCES school_bio
+ );
+
+CREATE TABLE tuition (
+TUITION_ID varchar(20),
+TUITION_TYPE varchar(20) NOT NULL,
+PRIMARY KEY (TUITION_ID)
+ );
+
+CREATE TABLE school_tuition (
+UNITID integer,
+TUITION_ID varchar(20) NOT NULL,
+TUITION integer,
+PRIMARY KEY (UNITID, TUITION_ID),
+FOREIGN KEY (TUITION_ID) REFERENCES tuition,
+
+);
+
+CREATE TABLE degree (
+DEGREE_ID integer,
+DEGREE varchar(30) NOT NULL,
+PRIMARY KEY (DEGREE_ID)
+);
+
+CREATE TABLE school_degree (
+UNITID integer,
+DEGREE_ID integer NOT NULL,
+PRIMARY KEY (UNITID, DEGREE_ID),
+FOREIGN KEY (DEGREE_ID) REFERENCES degree,
+FOREIGN KEY (UNITID) REFERENCES school_bio
+);
+
+CREATE TABLE program (
+PROGRAM_ID varchar(20),
+PROGRAM_TYPE text NOT NULL,
+PRIMARY KEY (PROGRAM_ID)
+ );
+
+CREATE TABLE school_program (
+UNITID integer,
+PROGRAM_ID varchar(20),
+PERCENT_AWARDED  numeric(5,4),
+PRIMARY KEY (UNITID, PROGRAM_ID),
+FOREIGN KEY (PROGRAM_ID) REFERENCES program,
+FOREIGN KEY (UNITID) REFERENCES school_bio
+ );
+
+CREATE TABLE student (
+STUDENT_ID varchar(20),
+STUDENT_TYPE text NOT NULL,
+PRIMARY KEY (STUDENT_ID)
+ );
+
+CREATE TABLE school_student(
+UNITID integer,
+STUDENT_ID varchar(20),
+ENROLLMENT_SHARE numeric(5,4),
+PRIMARY KEY (UNITID, STUDENT_ID),
+FOREIGN KEY (STUDENT_ID) REFERENCES student,
+FOREIGN KEY (UNITID) REFERENCES school_bio
+ );
+
+CREATE TABLE earning (
+EARNING_ID varchar(50),
+EARNING_TYPE text NOT NULL,
+PRIMARY KEY (EARNING_ID)
+ );
+
+CREATE TABLE school_earning(
+UNITID integer,
+EARNING_ID varchar(50),
+MEDIAN_EARNING integer,
+PRIMARY KEY (UNITID, EARNING_ID),
+FOREIGN KEY (EARNING_ID) REFERENCES earning,
+FOREIGN KEY (UNITID) REFERENCES school_bio
+ );
+
+
+"""
+connection.execute(stmt)
