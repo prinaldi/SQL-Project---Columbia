@@ -1,0 +1,178 @@
+#Read in college scorecard data and data dictionary#
+import numpy as np
+import pandas as pd
+df = pd.read_csv('collegescorecard.csv', encoding="ISO-8859-1")
+dictionary = pd.read_csv('dictionary.csv')
+
+#Converting data dictionary to create tables#
+
+a = dictionary['VARIABLE NAME'].unique()
+
+#Creating dataframe of unique variable names and assigning an ID to lookup later
+dictionary2 = pd.DataFrame(a, columns = ['VARIABLE NAME'])
+dictionary2 = dictionary2.dropna(axis = 0, how = 'any')
+dictionary2.insert(1,'VARIABLE NAME ID', range(1, 1 + len(dictionary2)))
+
+#Adding Variable ID back to dictionary
+dictionary = dictionary.merge(dictionary2, on='VARIABLE NAME', how='left')
+
+#Copying variable ID down to null cells#
+dictionary['VARIABLE NAME ID'] = dictionary['VARIABLE NAME ID'].ffill()
+dictionary = dictionary.merge(dictionary2, on='VARIABLE NAME ID', how='left')
+#Data dictionary ready#
+
+#Create Locale Table#
+locale = dictionary[['VALUE','LABEL']][dictionary['VARIABLE NAME_y']=='LOCALE']
+locale = locale.rename(columns={"VALUE": "locale", "LABEL": "locale_desc"})
+locale.to_sql(name='locale', con=engine, if_exists='append', index=False)
+
+#Create School Bio#
+school_bio = df[['UNITID', 'INSTNM', 'INSTURL','ADM_RATE','UGDS','AVGFACSAL','PFTFAC','DEBT_MDN']]
+school_bio = school_bio.dropna(subset = ['UNITID'])
+school_bio.columns = map(str.lower, school_bio.columns)
+school_bio.to_sql(name='school_bio', con=engine, if_exists='append', index=False) 
+
+city = df[['UNITID', 'CITY','STABBR','ZIP','LOCALE','LATITUDE','LONGITUDE','REGION']]
+city = city.dropna(subset = ['UNITID'])
+city = city[city['LOCALE'] >0 ]
+city.columns = map(str.lower, city.columns)
+city.to_sql(name='city', con=engine, if_exists='append', index=False) 
+
+    
+#Create mission  Table#
+mission = [['HBCU', 'Historically Black College and University'],
+           ['PBI', 'predominantly black institution'],
+           ['ANNHI', 'Alaska Native Native Hawaiian serving institution'],
+           ['TRIBAL', 'tribal college and university'],
+           ['AANAPII', 'Asian American Native American Pacific Islander-serving institution'],
+           ['HSI', 'Hispanic-serving institution'],
+           ['NANTI', 'Native American non-tribal institution']]
+mission = pd.DataFrame(mission, columns = ['mission_id','mission']) 
+mission.to_sql(name='mission', con=engine, if_exists='append', index=False)
+
+#Create School Mission Table#
+school_mission = df[['UNITID', 'HBCU', 'PBI','ANNHI','TRIBAL','AANAPII','HSI','NANTI']]
+school_mission = pd.melt(school_mission.reset_index(), id_vars = ['UNITID']).sort_values(by = ['UNITID'])
+school_mission = school_mission[school_mission.variable != 'index']
+school_mission = school_mission.dropna(subset = ['UNITID'])
+values = [1, '1']
+school_mission = school_mission[school_mission.value.isin(values)]
+school_mission = school_mission[['UNITID','variable']]
+school_mission.columns = ['unitid','mission_id']
+school_mission.to_sql(name='school_mission', con=engine, if_exists='append', index=False)
+
+
+
+#Create test table#
+testlist =[['SAT_AVG','Overall'],
+        ['SATVRMID','Reading'],
+        ['SATMTMID', 'Math'],
+        ['SATWRMID', 'Writing']]
+test = pd.DataFrame(testlist, columns = ['sat_id','sat_type'])  
+test.to_sql(name='test', con=engine, if_exists='append', index=False)
+
+#Create school test table#
+school_test = df[['UNITID','SAT_AVG', 'SATVRMID', 'SATMTMID','SATWRMID']]
+school_test = pd.melt(school_test.reset_index(), id_vars = ['UNITID'],var_name = "SAT_ID", 
+                         value_name = "SAT_SCORE").sort_values(by = ['UNITID'])
+school_test = school_test[school_test.SAT_ID != 'index']
+school_test = school_test.dropna(subset = ['UNITID'])
+school_test.columns = map(str.lower, school_test.columns)
+school_test.to_sql(name='school_test', con=engine, if_exists='append', index=False) 
+
+#Create control table#
+control = dictionary[['VALUE','LABEL']][dictionary['VARIABLE NAME_y']=='CONTROL']
+control = control.rename(columns={"VALUE": "control", "LABEL": "control_type"})
+control.to_sql(name='control', con=engine, if_exists='append', index=False)
+
+#Create schoool_control table#
+school_control = df[['UNITID','CONTROL']]
+school_control = school_control.dropna(subset = ['UNITID'])
+school_control.columns = map(str.lower, school_control.columns)
+school_control.to_sql(name='school_control', con=engine, if_exists='append', index=False)
+
+#Create tuition table#
+tuitionlist =[['TUITIONFEE_IN','In State'],
+        ['TUITIONFEE_OUT','Out of State']]
+tuition = pd.DataFrame(tuitionlist, columns = ['tuition_id','tuition_type'])  
+tuition.to_sql(name='tuition', con=engine, if_exists='append', index=False)
+
+#Create school tuition table#
+school_tuition = df[['UNITID','TUITIONFEE_IN', 'TUITIONFEE_OUT']]
+school_tuition = pd.melt(school_tuition.reset_index(), id_vars = ['UNITID'], var_name = "TUITION_ID", 
+                         value_name = "TUITION").sort_values(by = ['UNITID'])
+school_tuition = school_tuition[school_tuition.TUITION_ID != 'index']
+school_tuition = school_tuition.dropna(subset = ['UNITID'])
+school_tuition.columns = map(str.lower, school_tuition.columns)
+school_tuition.to_sql(name='school_tuition', con=engine, if_exists='append', index=False)
+
+#Create degree table#
+degree = dictionary[['VALUE','LABEL']][dictionary['VARIABLE NAME_y']=='HIGHDEG']
+degree = degree.rename(columns={"VALUE": "degree_id", "LABEL": "degree"})
+degree.to_sql(name='degree', con=engine, if_exists='append', index=False)
+
+#Create schoool_degree table#
+school_degree = df[['UNITID','HIGHDEG']]
+school_degree = school_degree.rename(columns={"HIGHDEG": "DEGREE_ID"})
+school_degree = school_degree.dropna(subset = ['UNITID'])
+school_degree.columns = map(str.lower, school_degree.columns)
+school_degree.to_sql(name='school_degree', con=engine, if_exists='append', index=False)  
+
+#Create program table#
+program = pd.DataFrame(df.columns.values, columns = ['PROGRAM_ID'])
+program = program[program.PROGRAM_ID.str.contains('PCI')]
+program = pd.merge(program, dictionary, left_on = 'PROGRAM_ID', right_on = 'VARIABLE NAME_x')
+program = program[['PROGRAM_ID','LABEL']]
+program = program.rename(columns={"LABEL": "PROGRAM_TYPE"})
+program.columns = map(str.lower, program.columns)
+program.to_sql(name='program', con=engine, if_exists='append', index=False) 
+
+#Create school program table#
+school_program = df[['UNITID','PCIP01','PCIP03','PCIP04','PCIP05','PCIP09','PCIP10','PCIP11','PCIP12','PCIP13','PCIP14',	
+                     'PCIP15','PCIP16','PCIP19','PCIP22','PCIP23','PCIP24','PCIP25','PCIP26','PCIP27','PCIP29',	
+                     'PCIP30','PCIP31','PCIP38','PCIP39','PCIP40','PCIP41','PCIP42','PCIP43','PCIP44','PCIP45',	
+                     'PCIP46','PCIP47','PCIP48','PCIP49','PCIP50','PCIP51','PCIP52','PCIP54']]
+school_program = pd.melt(school_program.reset_index(), id_vars = ['UNITID'],var_name = "PROGRAM_ID", 
+                         value_name = "PERCENT_AWARDED").sort_values(by = ['UNITID'])
+school_program = school_program[school_program.PROGRAM_ID != 'index']
+school_program = school_program.dropna(subset = ['UNITID'])
+school_program.columns = map(str.lower, school_program.columns)
+school_program.to_sql(name='school_program', con=engine, if_exists='append', index=False)  
+
+#Create student table#
+student = pd.DataFrame(df.columns.values, columns = ['STUDENT_ID'])
+student = student[student.STUDENT_ID.str.contains('UGDS_')]
+student = pd.merge(student, dictionary, left_on = 'STUDENT_ID', right_on = 'VARIABLE NAME_x')
+student = student[['STUDENT_ID','NAME OF DATA ELEMENT']]
+student = student.rename(columns={"STUDENT_ID":"student_id","NAME OF DATA ELEMENT": "student_type"})
+student.to_sql(name='student', con=engine, if_exists='append', index=False) 
+
+#Create school student table#
+school_student = df[['UNITID','UGDS_WHITE','UGDS_BLACK','UGDS_HISP','UGDS_ASIAN','UGDS_AIAN','UGDS_NHPI','UGDS_2MOR',
+                     'UGDS_NRA','UGDS_UNKN','UGDS_WHITENH','UGDS_BLACKNH','UGDS_API','UGDS_AIANOLD',
+                     'UGDS_HISPOLD','UGDS_MEN','UGDS_WOMEN']]
+school_student = pd.melt(school_student.reset_index(), id_vars = ['UNITID'],  var_name = "STUDENT_ID", 
+                         value_name = "ENROLLMENT_SHARE").sort_values(by = ['UNITID'])
+school_student = school_student[school_student.STUDENT_ID != 'index']
+school_student = school_student.dropna(subset = ['UNITID'])
+school_student.columns = map(str.lower, school_student.columns)
+school_student.to_sql(name='school_student', con=engine, if_exists='append', index=False)
+
+#Create earning table#
+earning = pd.DataFrame(df.columns.values, columns = ['EARNING_ID'])
+earning = earning[earning.EARNING_ID.str.contains('MD_EARN')]
+earning = pd.merge(earning, dictionary, left_on = 'EARNING_ID', right_on = 'VARIABLE NAME_x')
+earning = earning[['EARNING_ID','NAME OF DATA ELEMENT']]
+earning = earning.rename(columns={"NAME OF DATA ELEMENT": "EARNING_TYPE"})
+earning.columns = map(str.lower, earning.columns)
+earning.to_sql(name='earning', con=engine, if_exists='append', index=False) 
+
+#Create school earning table#
+school_earning = df[['UNITID','MD_EARN_WNE_P10','MD_EARN_WNE_P6','MD_EARN_WNE_P8']]
+school_earning = pd.melt(school_earning.reset_index(), id_vars = ['UNITID'],  var_name = "EARNING_ID", 
+                         value_name = "MEDIAN_EARNING").sort_values(by = ['UNITID'])
+school_earning = school_earning[school_earning.EARNING_ID != 'index']
+school_earning = school_earning[school_earning.MEDIAN_EARNING != 'PrivacySuppressed']
+school_earning = school_earning.dropna(subset = ['UNITID'])
+school_earning.columns = map(str.lower, school_earning.columns)
+school_earning.to_sql(name='school_earning', con=engine, if_exists='append', index=False)
