@@ -1,0 +1,328 @@
+--Below code allows for benchmarking across a variety of school measures including admission rates,
+--faculty salaries, enrollment size, and median debt. The code displays the measure value and the perecentile
+--rank for each of those measures. The percentile ranks were all coded so that the higher the percentile the
+--better, meaning a 99% equates to Top 1% in the country---
+SELECT   SCH.unitid
+		,instnm AS School
+		,CON.control_type
+		,adm_rate AS "Admission Rate"
+		,CAST(RANK() OVER (PARTITION BY control_type ORDER BY adm_rate DESC)*1.00 / 
+		 COUNT(SCH.unitid) OVER (PARTITION BY CON.control_type)*100 AS DECIMAL(10,1)) AS "Admission Rate Percentile Rank"
+		,ugds AS "Student Size"
+		,CAST(RANK() OVER (PARTITION BY control_type ORDER BY ugds ASC)*1.00 / 
+		 COUNT(SCH.unitid) OVER (PARTITION BY CON.control_type)*100 AS DECIMAL(10,1)) AS "Enrollment Size Percentile Rank"
+		,avgfacsal AS "Average Faculty Salary"
+		,CASE WHEN avgfacsal IS NULL THEN NULL ELSE
+		 CAST(RANK() OVER (PARTITION BY control_type ORDER BY avgfacsal ASC)*1.00 / 
+		 COUNT(SCH.unitid) OVER (PARTITION BY CON.control_type)*100 AS DECIMAL(10,1)) END AS "Faculty Salary Percentile Rank"
+		,debt_mdn AS "Median Debt"
+		,CASE WHEN debt_mdn ='PrivacySuppressed' THEN NULL ELSE
+		 CAST(RANK() OVER (PARTITION BY control_type ORDER BY debt_mdn DESC)*1.00 / 
+		 COUNT(SCH.unitid) OVER (PARTITION BY CON.control_type)*100 AS DECIMAL(10,1)) END AS "Student Deb Percentile Rank"
+FROM school_bio SCH
+JOIN school_control SCON
+	ON SCH.unitid = SCON.unitid
+JOIN Control CON
+	ON CON.control = SCON.control
+
+
+--Diversity of the student body is of value to the school and prospective students. This code looks at the
+--average enrollment share by demograpic group across the country. It also looks at each schools demographic
+--share and compares to that national average. It adds a count for each demo where the school average exceeds
+--the national average and then aggregrates that count as a Diversity score which schools are then ordinally
+--ranked on---
+
+SELECT T.unitid
+      ,instnm
+	  ,SUM(DiversityCount) AS DiversityScore
+FROM(
+	SELECT  A.unitid
+		   ,A.student_id
+		   ,A.enrollment_share
+		   ,B.AvgEnroll
+		   ,CASE WHEN enrollment_share > avgenroll THEN 1 ELSE 0 END AS DiversityCount
+	FROM(
+		(SELECT unitid
+			   ,student_id
+			   ,enrollment_share
+		FROM school_student
+		WHERE student_id NOT IN ('UGDS_NRA','UGDS_UNKN','UGDS_WHITENH','UGDS_BLACKNH','UGDS_AIANOLD','UGDS_HISPOLD','UGDS_MEN','UGDS_WOMEN'))A
+		JOIN
+		(SELECT student_id
+			   ,AVG(enrollment_share) AS AvgEnroll
+		FROM school_student
+		WHERE student_id NOT IN ('UGDS_NRA','UGDS_UNKN','UGDS_WHITENH','UGDS_BLACKNH','UGDS_AIANOLD','UGDS_HISPOLD','UGDS_MEN','UGDS_WOMEN')
+		GROUP BY student_id) B
+ON A.student_id = B.student_id)) T
+JOIN school_bio
+	ON T.unitid = school_bio.unitid
+GROUP BY T.unitid, instnm
+ORDER BY DiversityScore DESC
+
+--This query groups schools by Enrollment Size as this is not in the original file or in the ETL process
+--It allows for the numbers to be dynamically updated as it groups the schools into quintiles based on enrollment
+--size and then has the grouping range from the min to the max of that quintile grouping.
+SELECT   unitid
+        ,instnm
+		,ugds
+		,CONCAT(CAST(schoolminsize AS VARCHAR(5)),' TO ',CAST(schoolmaxsize AS VARCHAR(5)),' Students') AS SchoolSizeGrouping
+FROM(
+	SELECT  unitid
+	       ,instnm
+		   ,ugds
+		   ,FIRST.enrollmentgroup
+		   ,schoolminsize
+		   ,schoolmaxsize
+	FROM(
+		(SELECT unitid
+				,instnm
+		 		,ugds
+				,CASE WHEN EnrollmentPctRank < .2 THEN 'A'
+					  WHEN EnrollmentPctRank < .4 THEN 'B'
+					  WHEN EnrollmentPctRank < .6 THEN 'C'
+					  WHEN EnrollmentPctRank < .8 THEN 'D'
+					  WHEN EnrollmentPctRank <= 1 THEN 'E'
+					  END AS EnrollmentGroup
+		FROM(
+				SELECT  unitid
+					   ,instnm
+					   ,RANK() OVER(ORDER BY ugds) AS EnrollmentRank
+					   ,ugds
+					   ,(RANK() OVER(ORDER BY ugds) / (SELECT COUNT(unitid)*1.00 FROM school_bio)) AS EnrollmentPctRank
+				FROM school_bio) A ) FIRST
+
+		JOIN
+
+		(SELECT  enrollmentgroup 
+		 		,MAX(ugds) AS schoolmaxsize 
+		 	    ,MIN(ugds) AS schoolminsize
+		FROM(
+		SELECT 	unitid
+				,ugds
+				,CASE WHEN EnrollmentPctRank < .2 THEN 'A'
+					  WHEN EnrollmentPctRank < .4 THEN 'B'
+					  WHEN EnrollmentPctRank < .6 THEN 'C'
+					  WHEN EnrollmentPctRank < .8 THEN 'D'
+					  WHEN EnrollmentPctRank <= 1 THEN 'E'
+					  END AS EnrollmentGroup
+		FROM(
+				SELECT  unitid
+					   ,RANK() OVER(ORDER BY ugds) AS EnrollmentRank
+					   ,ugds
+					   ,(RANK() OVER(ORDER BY ugds) / (SELECT COUNT(unitid)*1.00 FROM school_bio)) AS EnrollmentPctRank
+				FROM school_bio) A )B
+		GROUP BY enrollmentgroup) SECOND
+		ON FIRST.enrollmentgroup = SECOND.enrollmentgroup)) H
+
+---Current table has sat score averages. Query below produces median sat scores---
+
+SELECT sat_type,
+	   CAST(AVG(sat_score) AS INT) as medianscore
+FROM(
+	SELECT unitid
+		   ,sat_type
+		   ,sat_score
+		   ,ROW_NUMBER() OVER(ORDER BY sat_score) AS row_id
+		   ,COUNT(*) OVER(ORDER BY sat_type) AS tests
+	FROM school_test
+	JOIN test
+	ON school_test.sat_id = test.sat_id
+	WHERE sat_type = 'Overall'
+	AND sat_score IS NOT NULL) A
+WHERE row_id BETWEEN tests/2.0 AND tests/2.0 + 1
+GROUP BY sat_type
+
+UNION
+
+SELECT sat_type,
+	   CAST(AVG(sat_score) AS INT) as medianscore
+FROM(
+
+	SELECT unitid
+		   ,sat_type
+		   ,sat_score
+		   ,ROW_NUMBER() OVER(ORDER BY sat_score) AS row_id
+		   ,COUNT(*) OVER(ORDER BY sat_type) AS tests
+	FROM school_test
+	JOIN test
+	ON school_test.sat_id = test.sat_id
+	WHERE sat_type = 'Reading'
+	AND sat_score IS NOT NULL) A
+WHERE row_id BETWEEN tests/2.0 AND tests/2.0 + 1
+GROUP BY sat_type
+
+UNION
+
+SELECT sat_type,
+	   CAST(AVG(sat_score) AS INT) as medianscore
+FROM(
+	SELECT  unitid
+		   ,sat_type
+		   ,sat_score
+		   ,ROW_NUMBER() OVER(ORDER BY sat_score) AS row_id
+		   ,COUNT(*) OVER(ORDER BY sat_type) AS tests
+	FROM school_test
+	JOIN test
+	ON school_test.sat_id = test.sat_id
+	WHERE sat_type = 'Writing'
+	AND sat_score IS NOT NULL) A
+WHERE row_id BETWEEN tests/2.0 AND tests/2.0 + 1
+GROUP BY sat_type
+
+UNION
+
+SELECT sat_type,
+	   CAST(AVG(sat_score) AS INT) as medianscore
+FROM(
+	SELECT unitid
+		   ,sat_type
+		   ,sat_score
+		   ,ROW_NUMBER() OVER(ORDER BY sat_score) AS row_id
+		   ,COUNT(*) OVER(ORDER BY sat_type) AS tests
+	FROM school_test
+	JOIN test
+	ON school_test.sat_id = test.sat_id
+	WHERE sat_type = 'Math'
+	AND sat_score IS NOT NULL) A
+WHERE row_id BETWEEN tests/2.0 AND tests/2.0 + 1
+GROUP BY sat_type
+
+--Query produces a measure called EarningDebtRatio which takes median debet for students and divides that
+--by the median earning 10 years from now data. It then shows the Top 20 and Bottom 20 Schools for that measure
+
+SELECT * FROM(
+SELECT  instnm
+        ,debt_mdn 
+		,earning.earning_id
+		,median_earning
+		,median_earning*1.00 / CAST(debt_mdn AS NUMERIC(10,4)) AS EarningDebtRatio
+ 		,'Top 20' AS MeasureGroup
+	FROM
+	school_earning 
+	JOIN earning
+	on earning.earning_id = school_earning.earning_id
+	JOIN school_bio
+	ON school_bio.unitid = school_earning.unitid
+	WHERE debt_mdn <> 'PrivacySuppressed'
+		AND median_earning IS NOT NULL
+		AND RIGHT(school_earning.earning_id, 2) = '10'
+	ORDER BY EarningDebtRatio DESC
+	LIMIT 20) A
+	
+UNION
+
+SELECT * FROM(
+SELECT  instnm
+        ,debt_mdn 
+		,earning.earning_id
+		,median_earning
+		,median_earning*1.00 / CAST(debt_mdn AS NUMERIC(10,4)) AS EarningDebtRatio
+ 		,'Top 20' AS MeasureGroup
+	FROM
+	school_earning 
+	JOIN earning
+	on earning.earning_id = school_earning.earning_id
+	JOIN school_bio
+	ON school_bio.unitid = school_earning.unitid
+	WHERE debt_mdn <> 'PrivacySuppressed'
+		AND median_earning IS NOT NULL
+		AND RIGHT(school_earning.earning_id, 2) = '10'
+	ORDER BY EarningDebtRatio DESC
+	LIMIT 20) B
+
+----Query to show schools by mission type and their undergrad size. Many schools have no mission so Coalesce function used----
+SELECT BIO.instnm
+	  ,BIO.ugds
+	  ,COALESCE(MIS.mission,'No Mission') AS Mission
+FROM school_bio BIO
+LEFT JOIN school_mission SMIS
+ON SMIS.unitid = BIO.unitid
+LEFT JOIN mission MIS
+ON MIS.mission_id = SMIS.mission_id
+ORDER BY Mission, ugds DESC
+
+--State statistics for schoos incluing number of schools, total enrollment across the state and average enrollment
+--of school inthe state.
+
+SELECT  stabbr
+       ,COUNT(BIO.unitid) AS NumberofSchools
+	   ,SUM(ugds) AS TotalUndergads
+	   ,ROUND(AVG(ugds)) AS AvgUndergradSize
+FROM city
+JOIN school_bio BIO
+ON BIO.unitid = city.unitid
+GROUP BY stabbr
+
+--Query ranks schools by exclusivity which is an imputed variable. First schools are ranked for SAT Ovearll 
+--and then by their admission rates. Those ranks are then aggregated to develop the exclusivity score and the lower the 
+--more exclusive the school is.
+
+SELECT *
+       ,AdmissionRank + SATAvgRank AS ExclusivityScore
+FROM(
+	SELECT  BIO.unitid
+		   ,instnm
+		   ,adm_rate AS AdmissionRate
+		   ,RANK() OVER(ORDER BY adm_rate ASC) AS AdmissionRank
+		   ,sat_score AS SATAvg
+		   ,RANK() OVER(ORDER BY test.sat_score DESC) AS SATAvgRank
+	FROM school_bio BIO
+	JOIN school_test TEST
+	ON TEST.unitid = BIO.unitid
+	WHERE adm_rate >0	
+		AND sat_id = 'SAT_AVG'
+		AND sat_score IS NOT NULL) A
+ORDER BY ExclusivityScore ASC
+
+--Comparison of tuition to that of state average. First the in state and out of state tuitions are average by state. Then 
+--each schools individual in and out of state tuitions are pulled and the state averages are shown for comparison
+
+SELECT  BIO.unitid
+	   ,instnm
+	   ,city.stabbr
+	   ,tuition.tuition_type
+	   ,tuition
+	   ,AvgTuitionForState
+FROM school_bio BIO
+JOIN school_tuition TUI
+ON BIO.unitid = TUI.unitid
+JOIN city
+ON BIO.unitid = city.unitid
+JOIN tuition 
+ON tuition.tuition_id = TUI.tuition_id
+JOIN
+(SELECT stabbr
+	   ,tuition_type	
+	   ,ROUND(AVG(tuition)) AS AvgTuitionForState
+FROM school_bio BIO
+JOIN school_tuition TUI
+ON BIO.unitid = TUI.unitid
+JOIN city
+ON BIO.unitid = city.unitid
+JOIN tuition 
+ON tuition.tuition_id = TUI.tuition_id
+GROUP BY stabbr, tuition_type) StateAvg
+ON city.stabbr = StateAvg.stabbr
+	AND tuition.tuition_type = StateAvg.tuition_type
+	
+--Total Fulltime Faculty and programs offered. All schools have a value for each program but many are showing as zero.
+--This query counts the number of programs the school actually offers--
+
+SELECT BIO.unitid
+      ,instnm
+	  ,stabbr
+	  ,city
+	  ,BIO.pftfac AS FullTimeFaculty
+      ,COUNT(program_id) AS ProgramsOffered
+FROM school_bio BIO
+JOIN city
+ON city.unitid = BIO.unitid
+JOIN school_program PRO
+ON PRO.unitid = BIO.unitid
+   AND percent_awarded >0
+GROUP BY BIO.unitid
+      ,instnm
+	  ,stabbr
+	  ,city
+	  ,pftfac
+ORDER BY ProgramsOffered DESC
